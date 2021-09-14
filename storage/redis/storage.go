@@ -1,18 +1,19 @@
 package redis
 
 import (
+	"context"
 	"fmt"
 	"time"
 
-	"github.com/go-redis/redis"
+	"github.com/go-redis/redis/v8"
 
 	"github.com/yurykabanov/throttler"
 )
 
 type redisClient interface {
-	Keys(pattern string) *redis.StringSliceCmd
-	Incr(key string) *redis.IntCmd
-	SetNX(key string, value interface{}, expiration time.Duration) *redis.BoolCmd
+	Keys(ctx context.Context, pattern string) *redis.StringSliceCmd
+	Incr(ctx context.Context, key string) *redis.IntCmd
+	SetNX(ctx context.Context, key string, value interface{}, expiration time.Duration) *redis.BoolCmd
 }
 
 type Storage struct {
@@ -27,10 +28,10 @@ func New(prefix string, client *redis.Client) *Storage {
 	}
 }
 
-func (s *Storage) CountLastExecuted(action throttler.Action, after time.Time) (int, error) {
+func (s *Storage) CountLastExecuted(ctx context.Context, action throttler.Action, after time.Time) (int, error) {
 	pattern := fmt.Sprintf("%s-%s-*", s.prefix, action.GroupID())
 
-	list, err := s.client.Keys(pattern).Result()
+	list, err := s.client.Keys(ctx, pattern).Result()
 	if err != nil {
 		return 0, err
 	}
@@ -38,16 +39,16 @@ func (s *Storage) CountLastExecuted(action throttler.Action, after time.Time) (i
 	return len(list), nil
 }
 
-func (s *Storage) SaveSuccessfulExecution(action throttler.Action, at time.Time, expiration time.Duration) error {
+func (s *Storage) SaveSuccessfulExecution(ctx context.Context, action throttler.Action, at time.Time, expiration time.Duration) error {
 	// Special global counter to avoid rare possibility to lose actions executed at the same time
-	counter, err := s.client.Incr(s.prefix).Result()
+	counter, err := s.client.Incr(ctx, s.prefix).Result()
 	if err != nil {
 		return err
 	}
 
 	key := fmt.Sprintf("%s-%s-%d-%d", s.prefix, action.GroupID(), at.UnixNano(), counter)
 
-	_, err = s.client.SetNX(key, at.UnixNano(), expiration).Result()
+	_, err = s.client.SetNX(ctx, key, at.UnixNano(), expiration).Result()
 	if err != nil {
 		return err
 	}

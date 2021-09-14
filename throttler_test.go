@@ -1,12 +1,13 @@
 package throttler
 
 import (
+	"context"
 	"errors"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
+	"testing"
 	"time"
 
-	"testing"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 var (
@@ -41,28 +42,32 @@ type testStorage struct {
 	mock.Mock
 }
 
-func (s *testStorage) CountLastExecuted(action Action, after time.Time) (int, error) {
-	args := s.Called(action, after)
+func (s *testStorage) CountLastExecuted(ctx context.Context, action Action, after time.Time) (int, error) {
+	args := s.Called(ctx, action, after)
 	return args.Int(0), args.Error(1)
 }
 
-func (s *testStorage) SaveSuccessfulExecution(action Action, at time.Time, expiration time.Duration) error {
-	args := s.Called(action, at, expiration)
+func (s *testStorage) SaveSuccessfulExecution(ctx context.Context, action Action, at time.Time, expiration time.Duration) error {
+	args := s.Called(ctx, action, at, expiration)
 	return args.Error(0)
 }
 
 func TestExecute_StorageCountError(t *testing.T) {
+	ctx := context.Background()
+
 	storage := &testStorage{}
-	storage.On("CountLastExecuted", mock.Anything, mock.Anything).Return(0, errors.New("something went wrong"))
+	storage.On("CountLastExecuted", ctx, mock.Anything, mock.Anything).Return(0, errors.New("something went wrong"))
 
 	throttler := New(5, time.Minute, storage)
 
-	err := throttler.Execute(&testAction{})
+	err := throttler.Execute(ctx, &testAction{})
 
 	assert.EqualError(t, err, "error querying the storage: something went wrong")
 }
 
 func TestExecute_StorageSaveError(t *testing.T) {
+	ctx := context.Background()
+
 	actionsCountInStorage := 0
 	maxAllowedActions := 1
 
@@ -70,12 +75,12 @@ func TestExecute_StorageSaveError(t *testing.T) {
 	action.On("Run").Return(nil).Once()
 
 	storage := &testStorage{}
-	storage.On("CountLastExecuted", action, mock.Anything).Return(actionsCountInStorage, nil)
-	storage.On("SaveSuccessfulExecution", action, mock.Anything, mock.Anything).Return(errors.New("something went wrong"))
+	storage.On("CountLastExecuted", ctx, action, mock.Anything).Return(actionsCountInStorage, nil)
+	storage.On("SaveSuccessfulExecution", ctx, action, mock.Anything, mock.Anything).Return(errors.New("something went wrong"))
 
 	throttler := New(maxAllowedActions, time.Minute, storage)
 
-	err := throttler.Execute(action)
+	err := throttler.Execute(ctx, action)
 
 	assert.EqualError(t, err, "error while storing successful execution: something went wrong")
 	action.AssertExpectations(t)
@@ -83,6 +88,8 @@ func TestExecute_StorageSaveError(t *testing.T) {
 }
 
 func TestExecute_VerifyLimit_NotExceedingLimit(t *testing.T) {
+	ctx := context.Background()
+
 	clock := &testClock{ConstTime: testTime}
 
 	actionsCountInStorage := 1
@@ -91,12 +98,12 @@ func TestExecute_VerifyLimit_NotExceedingLimit(t *testing.T) {
 	action := &testAction{}
 
 	storage := &testStorage{}
-	storage.On("CountLastExecuted", action, mock.Anything).Return(actionsCountInStorage, nil)
+	storage.On("CountLastExecuted", ctx, action, mock.Anything).Return(actionsCountInStorage, nil)
 
 	throttler := New(maxAllowedActions, time.Minute, storage)
 	throttler.clock = clock
 
-	err := throttler.Execute(action)
+	err := throttler.Execute(ctx, action)
 
 	assert.Error(t, err)
 	action.AssertExpectations(t)
@@ -104,6 +111,8 @@ func TestExecute_VerifyLimit_NotExceedingLimit(t *testing.T) {
 }
 
 func TestExecute_VerifyLimit_ExceedingLimit(t *testing.T) {
+	ctx := context.Background()
+
 	clock := &testClock{ConstTime: testTime}
 
 	actionsCountInStorage := 0
@@ -113,13 +122,13 @@ func TestExecute_VerifyLimit_ExceedingLimit(t *testing.T) {
 	action.On("Run").Return(nil).Once()
 
 	storage := &testStorage{}
-	storage.On("CountLastExecuted", action, sinceTime).Return(actionsCountInStorage, nil)
-	storage.On("SaveSuccessfulExecution", action, testTime, period).Return(nil)
+	storage.On("CountLastExecuted", ctx, action, sinceTime).Return(actionsCountInStorage, nil)
+	storage.On("SaveSuccessfulExecution", ctx, action, testTime, period).Return(nil)
 
 	throttler := New(maxAllowedActions, period, storage)
 	throttler.clock = clock
 
-	err := throttler.Execute(action)
+	err := throttler.Execute(ctx, action)
 
 	assert.NoError(t, err)
 	action.AssertExpectations(t)
@@ -127,6 +136,8 @@ func TestExecute_VerifyLimit_ExceedingLimit(t *testing.T) {
 }
 
 func TestExecute_VerifyLimit_NotExceedingLimit_ActionRunError(t *testing.T) {
+	ctx := context.Background()
+
 	actionsCountInStorage := 0
 	maxAllowedActions := 1
 
@@ -134,11 +145,11 @@ func TestExecute_VerifyLimit_NotExceedingLimit_ActionRunError(t *testing.T) {
 	action.On("Run").Return(errors.New("some error")).Once()
 
 	storage := &testStorage{}
-	storage.On("CountLastExecuted", action, mock.Anything).Return(actionsCountInStorage, nil)
+	storage.On("CountLastExecuted", ctx, action, mock.Anything).Return(actionsCountInStorage, nil)
 
 	throttler := New(maxAllowedActions, period, storage)
 
-	err := throttler.Execute(action)
+	err := throttler.Execute(ctx, action)
 
 	assert.EqualError(t, err, "some error")
 	action.AssertExpectations(t)

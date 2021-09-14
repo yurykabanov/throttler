@@ -1,6 +1,7 @@
 package throttler
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -36,8 +37,8 @@ func New(maxAllowedActions int, period time.Duration, storage Storage) *Throttle
 
 // Execute given action if limit is not reached.
 // Only successful attempts are counted (when no error returned upon calling `action.Run()`).
-func (t *Throttler) Execute(action Action) error {
-	actionsCount, err := t.storage.CountLastExecuted(action, t.clock.Now().Add(-t.period))
+func (t *Throttler) Execute(ctx context.Context, action Action) error {
+	actionsCount, err := t.storage.CountLastExecuted(ctx, action, t.clock.Now().Add(-t.period))
 	if err != nil {
 		return fmt.Errorf("error querying the storage: %w", err)
 	}
@@ -50,7 +51,7 @@ func (t *Throttler) Execute(action Action) error {
 		return err
 	}
 
-	err = t.storage.SaveSuccessfulExecution(action, t.clock.Now(), t.period)
+	err = t.storage.SaveSuccessfulExecution(ctx, action, t.clock.Now(), t.period)
 	if err != nil {
 		return fmt.Errorf("error while storing successful execution: %w", err)
 	}
